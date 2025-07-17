@@ -8,6 +8,21 @@ from datetime import datetime, timedelta
 import base64
 from io import BytesIO
 
+
+
+# This should be one of the first things in your app
+st.set_page_config(page_title="Your App Title", layout="wide")  # Optional
+
+# Hide the menu
+hide_menu_style = """
+<style>
+#MainMenu {visibility: hidden;}
+header {visibility: hidden;}
+footer {visibility: hidden;}
+</style>
+"""
+st.markdown(hide_menu_style, unsafe_allow_html=True)
+
 # ====================================
 # CENTRALIZED DEFAULT VALUES
 # ====================================
