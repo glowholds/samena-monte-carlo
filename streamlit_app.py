@@ -16,9 +16,20 @@ st.set_page_config(page_title="Your App Title", layout="wide")  # Optional
 # Hide the menu
 hide_menu_style = """
 <style>
+/* Hide hamburger menu */
 #MainMenu {visibility: hidden;}
-header {visibility: hidden;}
+
+/* Hide footer */
 footer {visibility: hidden;}
+
+/* Hide the deploy button (rocket icon) */
+.stDeployButton {display: none;}
+
+/* Optional: Hide the GitHub icon if present */
+.stGitHubButton {display: none;}
+
+/* Optional: Hide the entire toolbar */
+.stToolbar {visibility: hidden;}
 </style>
 """
 st.markdown(hide_menu_style, unsafe_allow_html=True)
