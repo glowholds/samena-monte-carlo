@@ -25,6 +25,7 @@ footer {visibility: hidden;}
 """
 st.markdown(hide_all, unsafe_allow_html=True)
 
+
 # ====================================
 # CENTRALIZED DEFAULT VALUES
 # ====================================
@@ -60,6 +61,10 @@ DEFAULT_VALUES = {
     "preschool_monthly_expenses": 45000,  # Monthly preschool expenses
     "program_growth_rate": 2.0,  # Annual program growth rate (%)
     "program_uncertainty": 15.0,  # Program revenue/expense uncertainty (%)
+
+    # Lump Sum Gift
+    "lump_sum_gift_amount": 0,  # One-time gift amount
+    "lump_sum_gift_uncertainty": 20.0,  # Gift uncertainty (%)
 
     # Simulation Settings
     "months": 24,  # Months to project
@@ -228,7 +233,9 @@ def run_simulation(
         program_revenues=None,
         program_expenses=None,
         program_growth_rate=0.0,
-        program_uncertainty=0.0
+        program_uncertainty=0.0,
+        lump_sum_gift_amount=0,
+        lump_sum_gift_uncertainty=0.0
 ):
     # Set random seed for reproducibility
     np.random.seed(42)
@@ -259,6 +266,19 @@ def run_simulation(
         0.5, 1.5
     )
 
+    # Lump sum gift variability (with possibility of not receiving it)
+    if lump_sum_gift_amount > 0:
+        # Generate gift amounts with uncertainty
+        gift_amounts = np.random.normal(lump_sum_gift_amount, lump_sum_gift_amount * lump_sum_gift_uncertainty,
+                                        n_simulations)
+        # Add probability of not receiving gift at all (higher uncertainty = higher chance of no gift)
+        gift_probability = np.random.random(n_simulations) > (
+                    lump_sum_gift_uncertainty * 0.5)  # Max 50% chance of no gift
+        gift_amounts = gift_amounts * gift_probability
+        gift_amounts = np.maximum(gift_amounts, 0)  # No negative gifts
+    else:
+        gift_amounts = np.zeros(n_simulations)
+
     ending_reserves = []
     reserve_trajectories = []
     member_trajectories = []
@@ -271,6 +291,9 @@ def run_simulation(
         # One-time assessment revenue
         assessment_revenue = assessment_amount * (initial_members * assessment_payment_rate[i])
         reserves += assessment_revenue
+
+        # One-time lump sum gift
+        reserves += gift_amounts[i]
 
         # Adjusted monthly dues
         monthly_dues_adjusted = monthly_dues * dues_increase_factor[i]
@@ -486,6 +509,32 @@ def main():
                 help="One-time payment requested from each member household",
                 format="%d"
             )
+
+        # Lump Sum Gift
+        with st.expander("🎁 One-Time Gift/Donation", expanded=True):
+            st.markdown("""
+            <div class="help-text">
+            Model a potential one-time donation from a generous member or supporter to help the club through its current situation.
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("**Potential donation amount**")
+            lump_sum_gift_amount = st.number_input(
+                "Lump Sum Gift Amount",
+                value=DEFAULT_VALUES["lump_sum_gift_amount"],
+                step=10000,
+                help="One-time donation amount (e.g., from a major donor wanting to help)",
+                format="%d"
+            )
+
+            st.markdown("**Donation uncertainty**")
+            lump_sum_gift_uncertainty = st.slider(
+                "Gift Uncertainty (±%)",
+                0, 50, int(DEFAULT_VALUES["lump_sum_gift_uncertainty"]), 5,
+                help="How certain are you about receiving this gift? Higher = less certain",
+                key="gift_uncertainty"
+            )
+            lump_sum_gift_uncertainty = lump_sum_gift_uncertainty / 100
 
         # Program Revenues and Expenses
         with st.expander("🏊 Program Revenues & Expenses", expanded=True):
@@ -717,6 +766,7 @@ def main():
         st.markdown("---")
         st.markdown("### 📊 Quick Math")
         expected_assessment = int(initial_members * assessment_payment_mean * assessment_amount)
+        expected_gift = int(lump_sum_gift_amount * (1 - lump_sum_gift_uncertainty * 0.5))  # Account for probability
         new_monthly_revenue = int(initial_members * retention_mean * monthly_dues * dues_increase_mean)
 
         # Calculate program net revenue
@@ -731,6 +781,8 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"**Expected from assessment:**  \n${expected_assessment:,}")
+            if lump_sum_gift_amount > 0:
+                st.markdown(f"**Expected from gift:**  \n${expected_gift:,}")
             st.markdown(f"**New monthly dues revenue:**  \n${new_monthly_revenue:,}")
             st.markdown(f"**Monthly program net revenue:**  \n${program_net:,}")
 
@@ -774,7 +826,9 @@ def main():
                 program_revenues,
                 program_expenses,
                 program_growth_rate,
-                program_uncertainty
+                program_uncertainty,
+                lump_sum_gift_amount,
+                lump_sum_gift_uncertainty
             )
 
         # Calculate statistics
@@ -826,6 +880,11 @@ def main():
                        after_school_revenue - after_school_expenses +
                        preschool_revenue - preschool_expenses)
 
+        # Build the one-time income sources section
+        one_time_sources = f'<li>Assessment revenue: <strong>${expected_assessment:,}</strong></li>'
+        if lump_sum_gift_amount > 0:
+            one_time_sources += f'<li>Gift/donation: <strong>${expected_gift:,}</strong> ({100 - lump_sum_gift_uncertainty * 50:.0f}% probability)</li>'
+
         st.markdown(f"""
         <div class="insight-box">
             <h4>💡 What This Means</h4>
@@ -833,8 +892,13 @@ def main():
                 <li><strong>{(sum(1 for r in ending_reserves if r > danger_threshold) / len(ending_reserves) * 100):.1f}%</strong> chance 
                     of maintaining safe reserve levels (above ${danger_threshold:,})</li>
                 <li>If the median scenario plays out, you'll {'gain' if p50 > starting_reserves else 'lose'} 
-                    <strong>${abs(p50 - starting_reserves):,}</strong> over {months} months</li>
-                <li>In the worst 5% of scenarios, reserves could drop to <strong>${p5:,}</strong></li>
+                    <strong>${abs(p50 - starting_reserves):,.0f}</strong> over {months} months</li>
+                <li>In the worst 5% of scenarios, reserves could drop to <strong>${p5:,.0f}</strong></li>
+                <li>One-time income sources:
+                    <ul>
+                        {one_time_sources}
+                    </ul>
+                </li>
                 <li>Monthly revenue breakdown:
                     <ul>
                         <li>Dues revenue: <strong>${(initial_members * retention_mean * monthly_dues * dues_increase_mean):,.0f}</strong></li>
@@ -993,6 +1057,7 @@ def main():
                 st.markdown("**Positive Factors:**")
                 st.markdown(f"""
                 - Assessment collection: ${assessment_amount * initial_members * assessment_payment_mean:,.0f} expected
+                {f'- Lump sum gift: ${expected_gift:,.0f} expected' if lump_sum_gift_amount > 0 else ''}
                 - Dues increase: {(dues_increase_mean - 1) * 100:.0f}% boost to revenue
                 - New member growth: {new_members_per_month * months} expected over {months} months
                 - Program net revenue: ${program_net:,.0f}/month
@@ -1005,6 +1070,7 @@ def main():
                 - Member attrition: {(1 - retention_mean) * 100:.0f}% expected loss
                 - Expense growth: {expense_growth_rate * 100:.0f}% annual increase
                 - Collection uncertainty: ±{assessment_payment_std * 100:.0f}% variation
+                {f'- Gift uncertainty: ±{lump_sum_gift_uncertainty * 100:.0f}% variation' if lump_sum_gift_amount > 0 else ''}
                 - Program uncertainty: ±{program_uncertainty * 100:.0f}% variation
                 """)
 
@@ -1018,6 +1084,7 @@ def main():
                     'initial_members': initial_members,
                     'assessment_amount': assessment_amount,
                     'monthly_dues': monthly_dues,
+                    'lump_sum_gift': lump_sum_gift_amount,
                     'months_simulated': months,
                     'simulations_run': n_simulations
                 },
@@ -1078,6 +1145,7 @@ def main():
                 <h3>🎯 What You Can Test</h3>
                 <p>• Special assessments</p>
                 <p>• Dues increases</p>
+                <p>• Lump sum gifts</p>
                 <p>• Member retention impacts</p>
                 <p>• Growth scenarios</p>
             </div>
@@ -1092,6 +1160,7 @@ def main():
             2. **Set your proposed changes**:
                - How much is the special assessment?
                - What percentage dues increase are you considering?
+               - Is there a potential major gift/donation?
             3. **Estimate member reactions**:
                - What percentage will pay the assessment?
                - How many members might leave?
