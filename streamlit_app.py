@@ -31,13 +31,13 @@ st.markdown(hide_all, unsafe_allow_html=True)
 # ====================================
 DEFAULT_VALUES = {
     # Financial Baseline
-    "starting_reserves": 250000,  # Current cash reserves
-    "monthly_expenses": 400000,  # Monthly operating expenses
+    "starting_reserves": 228299,  # Current cash reserves (FY2025)
+    "monthly_expenses": 309362,  # Monthly operating expenses (FY2025: ($5,193,534 / 12)-123,432 program expenses)
     "expense_growth_rate": 3.0,  # Annual expense growth rate (%)
 
     # Membership and Dues
-    "initial_members": 1500,  # Number of member households
-    "monthly_dues": 130,  # Monthly dues per household
+    "initial_members": 1543,  # Number of member households (estimated from dues revenue)
+    "monthly_dues": 114,  # Monthly dues per household (FY2025: $2,017,233 / 1543 / 12)
     "assessment_amount": 800,  # Special assessment amount
 
     # Member Behavior Predictions
@@ -51,14 +51,17 @@ DEFAULT_VALUES = {
     "new_members_std": 2,  # Variability
 
     # Program Revenues and Expenses
-    "swim_lessons_monthly_revenue": 50000,  # Monthly swim lesson revenue
-    "swim_lessons_monthly_expenses": 35000,  # Monthly swim lesson expenses
-    "summer_camp_monthly_revenue": 80000,  # Monthly summer camp revenue (averaged)
-    "summer_camp_monthly_expenses": 60000,  # Monthly summer camp expenses (averaged)
-    "after_school_monthly_revenue": 40000,  # Monthly after school revenue
-    "after_school_monthly_expenses": 30000,  # Monthly after school expenses
-    "preschool_monthly_revenue": 60000,  # Monthly preschool revenue
-    "preschool_monthly_expenses": 45000,  # Monthly preschool expenses
+    "youth_programs_monthly_revenue": 91345,  # Monthly youth programs revenue ($1,096,144 / 12)
+    "youth_programs_monthly_expenses": 56964,  # Monthly youth programs expenses ($683,568 / 12)
+    "aquatics_monthly_revenue": 110534,  # Monthly aquatics revenue ($1,326,415 / 12)
+    "aquatics_monthly_expenses": 47102,  # Monthly aquatics expenses ($565,225 / 12)
+    "fitness_monthly_revenue": 7102,  # Monthly fitness revenue ($85,233 / 12)
+    "fitness_monthly_expenses": 15086,  # Monthly fitness expenses ($181,038 / 12)
+    "rental_monthly_revenue": 8808,  # Monthly rental revenue ($105,695 / 12)
+    "retail_monthly_revenue": 2951,  # Monthly retail revenue ($35,416 / 12)
+    "retail_monthly_expenses": 2601,  # Monthly retail expenses ($31,215 / 12)
+    "special_events_monthly_revenue": 2572,  # Monthly special events revenue ($30,873 / 12)
+    "special_events_monthly_expenses": 1699,  # Monthly special events expenses ($20,391 / 12)
     "program_growth_rate": 2.0,  # Annual program growth rate (%)
     "program_uncertainty": 15.0,  # Program revenue/expense uncertainty (%)
 
@@ -72,10 +75,10 @@ DEFAULT_VALUES = {
     "danger_threshold": 250000,  # Minimum safe reserve level
 
     # Display Settings
-    "current_cash": 720251,  # Cash from Form 990
-    "current_savings": 26113,  # Savings from Form 990
-    "annual_expenses": 4800000,  # Total annual expenses
-    "annual_dues_revenue": 2000000,  # Annual dues revenue
+    "current_cash": 228299,  # Cash from FY2025 Statement of Financial Position
+    "current_savings": 0,  # No separate savings shown in FY2025
+    "annual_expenses": 4832058,  # Total annual expenses FY2025
+    "annual_dues_revenue": 2017233,  # Annual dues revenue FY2025
 }
 
 # Set page config
@@ -451,7 +454,7 @@ def main():
         st.markdown("""
         <div class="help-text">
         Adjust the settings below to see how different scenarios might affect the club's finances.
-        Current data is based on your 2023 Form 990.
+        Current data is based on your FY2025 financial statements.
         </div>
         """, unsafe_allow_html=True)
 
@@ -462,7 +465,7 @@ def main():
                 "Current Cash Reserves",
                 value=DEFAULT_VALUES["starting_reserves"],
                 step=10000,
-                help=f"Based on Form 990: Cash (${DEFAULT_VALUES['current_cash']:,}) + Savings (${DEFAULT_VALUES['current_savings']:,})",
+                help=f"Based on FY2025: Cash ${DEFAULT_VALUES['current_cash']:,}",
                 format="%d"
             )
 
@@ -471,7 +474,7 @@ def main():
                 "Monthly Operating Expenses",
                 value=DEFAULT_VALUES["monthly_expenses"],
                 step=5000,
-                help=f"Based on Form 990: Total annual expenses (${DEFAULT_VALUES['annual_expenses'] / 1e6:.1f}M) ÷ 12",
+                help=f"Based on FY2025: Total annual expenses (${DEFAULT_VALUES['annual_expenses'] / 1e6:.1f}M) ÷ 12",
                 format="%d"
             )
 
@@ -489,7 +492,7 @@ def main():
                 "Number of Member Households",
                 value=DEFAULT_VALUES["initial_members"],
                 step=10,
-                help=f"Based on Form 990: {DEFAULT_VALUES['initial_members']} members reported"
+                help=f"Based on FY2025: Estimated from dues revenue",
             )
 
             st.markdown("**Current monthly dues**")
@@ -497,7 +500,7 @@ def main():
                 "Monthly Dues per Household",
                 value=DEFAULT_VALUES["monthly_dues"],
                 step=25,
-                help=f"Based on Form 990: ${DEFAULT_VALUES['annual_dues_revenue'] / 1e6:.1f}M annual dues ÷ {DEFAULT_VALUES['initial_members']} members ÷ 12 months",
+                help=f"Based on FY2025: ${DEFAULT_VALUES['annual_dues_revenue'] / 1e6:.1f}M annual dues ÷ {DEFAULT_VALUES['initial_members']} members ÷ 12 months",
                 format="%d"
             )
 
@@ -541,95 +544,129 @@ def main():
             st.markdown("""
             <div class="help-text">
             Enter monthly revenues and expenses for each program. These will grow at the program growth rate.
+            Note: Rental revenue has no associated expenses in the financials.
             </div>
             """, unsafe_allow_html=True)
 
-            # Swim Lessons
-            st.markdown("**🏊 Swim Lessons**")
+            # Youth Programs
+            st.markdown("**👦 Youth Programs**")
             col1, col2 = st.columns(2)
             with col1:
-                swim_lessons_revenue = st.number_input(
+                youth_programs_revenue = st.number_input(
                     "Monthly Revenue",
-                    value=DEFAULT_VALUES["swim_lessons_monthly_revenue"],
+                    value=DEFAULT_VALUES["youth_programs_monthly_revenue"],
                     step=5000,
-                    help="Average monthly revenue from swim lessons",
+                    help="Average monthly revenue from youth programs",
                     format="%d",
-                    key="swim_rev"
+                    key="youth_rev"
                 )
             with col2:
-                swim_lessons_expenses = st.number_input(
+                youth_programs_expenses = st.number_input(
                     "Monthly Expenses",
-                    value=DEFAULT_VALUES["swim_lessons_monthly_expenses"],
+                    value=DEFAULT_VALUES["youth_programs_monthly_expenses"],
                     step=5000,
-                    help="Average monthly expenses for swim lessons",
+                    help="Average monthly expenses for youth programs",
                     format="%d",
-                    key="swim_exp"
+                    key="youth_exp"
                 )
 
-            # Summer Camp
-            st.markdown("**☀️ Summer Camp**")
+            # Aquatics
+            st.markdown("**🏊 Aquatics**")
             col1, col2 = st.columns(2)
             with col1:
-                summer_camp_revenue = st.number_input(
-                    "Monthly Revenue (averaged)",
-                    value=DEFAULT_VALUES["summer_camp_monthly_revenue"],
+                aquatics_revenue = st.number_input(
+                    "Monthly Revenue",
+                    value=DEFAULT_VALUES["aquatics_monthly_revenue"],
                     step=5000,
-                    help="Average monthly revenue from summer camp (seasonal revenue averaged over 12 months)",
+                    help="Average monthly revenue from aquatics",
                     format="%d",
-                    key="camp_rev"
+                    key="aquatics_rev"
                 )
             with col2:
-                summer_camp_expenses = st.number_input(
-                    "Monthly Expenses (averaged)",
-                    value=DEFAULT_VALUES["summer_camp_monthly_expenses"],
+                aquatics_expenses = st.number_input(
+                    "Monthly Expenses",
+                    value=DEFAULT_VALUES["aquatics_monthly_expenses"],
                     step=5000,
-                    help="Average monthly expenses for summer camp",
+                    help="Average monthly expenses for aquatics",
                     format="%d",
-                    key="camp_exp"
+                    key="aquatics_exp"
                 )
 
-            # After School
-            st.markdown("**📚 After School Program**")
+            # Fitness
+            st.markdown("**💪 Fitness**")
             col1, col2 = st.columns(2)
             with col1:
-                after_school_revenue = st.number_input(
+                fitness_revenue = st.number_input(
                     "Monthly Revenue",
-                    value=DEFAULT_VALUES["after_school_monthly_revenue"],
+                    value=DEFAULT_VALUES["fitness_monthly_revenue"],
                     step=5000,
-                    help="Average monthly revenue from after school program",
+                    help="Average monthly revenue from fitness",
                     format="%d",
-                    key="after_rev"
+                    key="fitness_rev"
                 )
             with col2:
-                after_school_expenses = st.number_input(
+                fitness_expenses = st.number_input(
                     "Monthly Expenses",
-                    value=DEFAULT_VALUES["after_school_monthly_expenses"],
+                    value=DEFAULT_VALUES["fitness_monthly_expenses"],
                     step=5000,
-                    help="Average monthly expenses for after school program",
+                    help="Average monthly expenses for fitness",
                     format="%d",
-                    key="after_exp"
+                    key="fitness_exp"
                 )
 
-            # Preschool
-            st.markdown("**👶 Preschool**")
+            # Rental (Revenue only)
+            st.markdown("**🏠 Rental**")
+            rental_revenue = st.number_input(
+                "Monthly Revenue",
+                value=DEFAULT_VALUES["rental_monthly_revenue"],
+                step=1000,
+                help="Average monthly revenue from facility rentals",
+                format="%d",
+                key="rental_rev"
+            )
+
+            # Retail
+            st.markdown("**🛍️ Retail**")
             col1, col2 = st.columns(2)
             with col1:
-                preschool_revenue = st.number_input(
+                retail_revenue = st.number_input(
                     "Monthly Revenue",
-                    value=DEFAULT_VALUES["preschool_monthly_revenue"],
-                    step=5000,
-                    help="Average monthly revenue from preschool",
+                    value=DEFAULT_VALUES["retail_monthly_revenue"],
+                    step=1000,
+                    help="Average monthly revenue from retail",
                     format="%d",
-                    key="pre_rev"
+                    key="retail_rev"
                 )
             with col2:
-                preschool_expenses = st.number_input(
+                retail_expenses = st.number_input(
                     "Monthly Expenses",
-                    value=DEFAULT_VALUES["preschool_monthly_expenses"],
-                    step=5000,
-                    help="Average monthly expenses for preschool",
+                    value=DEFAULT_VALUES["retail_monthly_expenses"],
+                    step=1000,
+                    help="Average monthly expenses for retail",
                     format="%d",
-                    key="pre_exp"
+                    key="retail_exp"
+                )
+
+            # Special Events
+            st.markdown("**🎉 Special Events**")
+            col1, col2 = st.columns(2)
+            with col1:
+                special_events_revenue = st.number_input(
+                    "Monthly Revenue",
+                    value=DEFAULT_VALUES["special_events_monthly_revenue"],
+                    step=1000,
+                    help="Average monthly revenue from special events",
+                    format="%d",
+                    key="events_rev"
+                )
+            with col2:
+                special_events_expenses = st.number_input(
+                    "Monthly Expenses",
+                    value=DEFAULT_VALUES["special_events_monthly_expenses"],
+                    step=1000,
+                    help="Average monthly expenses for special events",
+                    format="%d",
+                    key="events_exp"
                 )
 
             # Program growth rate
@@ -770,10 +807,12 @@ def main():
         new_monthly_revenue = int(initial_members * retention_mean * monthly_dues * dues_increase_mean)
 
         # Calculate program net revenue
-        program_net = (swim_lessons_revenue - swim_lessons_expenses +
-                       summer_camp_revenue - summer_camp_expenses +
-                       after_school_revenue - after_school_expenses +
-                       preschool_revenue - preschool_expenses)
+        program_net = (youth_programs_revenue - youth_programs_expenses +
+                       aquatics_revenue - aquatics_expenses +
+                       fitness_revenue - fitness_expenses +
+                       rental_revenue +  # Rental has no expenses
+                       retail_revenue - retail_expenses +
+                       special_events_revenue - special_events_expenses)
 
         total_monthly_revenue = new_monthly_revenue + program_net
         monthly_difference = total_monthly_revenue - monthly_expenses
@@ -801,10 +840,11 @@ def main():
     if run_simulation_btn:
         with st.spinner("Running simulations..."):
             # Prepare program data
-            program_revenues = [swim_lessons_revenue, summer_camp_revenue,
-                                after_school_revenue, preschool_revenue]
-            program_expenses = [swim_lessons_expenses, summer_camp_expenses,
-                                after_school_expenses, preschool_expenses]
+            program_revenues = [youth_programs_revenue, aquatics_revenue, fitness_revenue,
+                                rental_revenue, retail_revenue, special_events_revenue]
+            program_expenses = [youth_programs_expenses, aquatics_expenses, fitness_expenses,
+                                0,  # Rental has no expenses
+                                retail_expenses, special_events_expenses]
 
             ending_reserves, reserve_trajectories, member_trajectories = run_simulation(
                 starting_reserves,
@@ -875,10 +915,12 @@ def main():
             )
 
         # Insights box
-        program_net = (swim_lessons_revenue - swim_lessons_expenses +
-                       summer_camp_revenue - summer_camp_expenses +
-                       after_school_revenue - after_school_expenses +
-                       preschool_revenue - preschool_expenses)
+        program_net = (youth_programs_revenue - youth_programs_expenses +
+                       aquatics_revenue - aquatics_expenses +
+                       fitness_revenue - fitness_expenses +
+                       rental_revenue +  # Rental has no expenses
+                       retail_revenue - retail_expenses +
+                       special_events_revenue - special_events_expenses)
 
         # Build the one-time income sources section
         one_time_sources = f'<li>Assessment revenue: <strong>${expected_assessment:,}</strong></li>'
@@ -949,30 +991,38 @@ def main():
 
             # Program summary table
             program_df = pd.DataFrame({
-                'Program': ['Swim Lessons', 'Summer Camp', 'After School', 'Preschool'],
-                'Monthly Revenue': [f"${r:,}" for r in [swim_lessons_revenue, summer_camp_revenue,
-                                                        after_school_revenue, preschool_revenue]],
-                'Monthly Expenses': [f"${e:,}" for e in [swim_lessons_expenses, summer_camp_expenses,
-                                                         after_school_expenses, preschool_expenses]],
-                'Net Income': [f"${r - e:,}" for r, e in [(swim_lessons_revenue, swim_lessons_expenses),
-                                                          (summer_camp_revenue, summer_camp_expenses),
-                                                          (after_school_revenue, after_school_expenses),
-                                                          (preschool_revenue, preschool_expenses)]],
+                'Program': ['Youth Programs', 'Aquatics', 'Fitness', 'Rental', 'Retail', 'Special Events'],
+                'Monthly Revenue': [f"${r:,}" for r in [youth_programs_revenue, aquatics_revenue,
+                                                        fitness_revenue, rental_revenue,
+                                                        retail_revenue, special_events_revenue]],
+                'Monthly Expenses': [f"${e:,}" for e in [youth_programs_expenses, aquatics_expenses,
+                                                         fitness_expenses, 0,
+                                                         retail_expenses, special_events_expenses]],
+                'Net Income': [f"${r - e:,}" for r, e in [(youth_programs_revenue, youth_programs_expenses),
+                                                          (aquatics_revenue, aquatics_expenses),
+                                                          (fitness_revenue, fitness_expenses),
+                                                          (rental_revenue, 0),
+                                                          (retail_revenue, retail_expenses),
+                                                          (special_events_revenue, special_events_expenses)]],
                 'Margin %': [f"{((r - e) / r * 100):.1f}%" if r > 0 else "0.0%"
-                             for r, e in [(swim_lessons_revenue, swim_lessons_expenses),
-                                          (summer_camp_revenue, summer_camp_expenses),
-                                          (after_school_revenue, after_school_expenses),
-                                          (preschool_revenue, preschool_expenses)]]
+                             for r, e in [(youth_programs_revenue, youth_programs_expenses),
+                                          (aquatics_revenue, aquatics_expenses),
+                                          (fitness_revenue, fitness_expenses),
+                                          (rental_revenue, 0),
+                                          (retail_revenue, retail_expenses),
+                                          (special_events_revenue, special_events_expenses)]]
             })
 
             st.dataframe(program_df, hide_index=True)
 
             # Program contribution chart
-            program_names = ['Swim Lessons', 'Summer Camp', 'After School', 'Preschool']
-            program_nets = [swim_lessons_revenue - swim_lessons_expenses,
-                            summer_camp_revenue - summer_camp_expenses,
-                            after_school_revenue - after_school_expenses,
-                            preschool_revenue - preschool_expenses]
+            program_names = ['Youth Programs', 'Aquatics', 'Fitness', 'Rental', 'Retail', 'Special Events']
+            program_nets = [youth_programs_revenue - youth_programs_expenses,
+                            aquatics_revenue - aquatics_expenses,
+                            fitness_revenue - fitness_expenses,
+                            rental_revenue,  # No expenses
+                            retail_revenue - retail_expenses,
+                            special_events_revenue - special_events_expenses]
 
             fig_programs = go.Figure()
             fig_programs.add_trace(go.Bar(
@@ -1018,7 +1068,7 @@ def main():
             st.plotly_chart(fig_growth, use_container_width=True)
 
             st.info(f"""
-            📊 **Program Summary**: The four programs combined currently generate **${program_net:,}** in monthly net revenue.
+            📊 **Program Summary**: The six programs combined currently generate **${program_net:,}** in monthly net revenue.
 
             With {program_growth_rate * 100:.1f}% annual growth, this could reach **${program_net * (1 + program_growth_rate) ** 2:,.0f}** in 24 months.
 
@@ -1124,7 +1174,7 @@ def main():
                 <p><strong>Cash on hand:</strong> ${DEFAULT_VALUES['starting_reserves']:,}</p>
                 <p><strong>Monthly expenses:</strong> ~${DEFAULT_VALUES['monthly_expenses']:,}</p>
                 <p><strong>Runway:</strong> ~{DEFAULT_VALUES['starting_reserves'] / DEFAULT_VALUES['monthly_expenses']:.1f} months</p>
-                <p class="help-text">Based on 2023 Form 990</p>
+                <p class="help-text">Based on FY2025 financials</p>
             </div>
             """, unsafe_allow_html=True)
 
