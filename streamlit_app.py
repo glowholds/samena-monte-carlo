@@ -32,7 +32,7 @@ st.markdown(hide_all, unsafe_allow_html=True)
 DEFAULT_VALUES = {
     # Financial Baseline
     "starting_reserves": 228299,  # Current cash reserves (FY2025)
-    "monthly_expenses": 309362,  # Monthly operating expenses (FY2025: ($5,193,534 / 12)-123,432 program expenses)
+    "monthly_expenses": 432795,  # Monthly operating expenses (FY2025: ($5,193,534 / 12)-123,432 program expenses)
     "expense_growth_rate": 3.0,  # Annual expense growth rate (%)
 
     # Membership and Dues
