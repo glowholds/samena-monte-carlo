@@ -25,6 +25,7 @@ footer {visibility: hidden;}
 """
 st.markdown(hide_all, unsafe_allow_html=True)
 
+
 # ====================================
 # CENTRALIZED DEFAULT VALUES
 # ====================================
@@ -973,38 +974,40 @@ def main():
                 help="The minimum cash balance needed for safe operations",
                 format="%d"
             )
-        # ─── Compact Quick Overview ───
+        # ─── Quick Overview ───
         st.markdown("---")
         st.subheader("📊 Quick Overview")
 
-        # Compute key figures
-        expected_assessment = int(initial_members * assessment_payment_mean_decimal * assessment_amount)
+        # Calculate key figures
+        one_time_income = int(initial_members * assessment_payment_mean_decimal * assessment_amount)
         expected_gift = int(lump_sum_gift_amount * (1 - lump_sum_gift_uncertainty * 0.5))
-        expected_one_time = expected_assessment + (expected_gift if lump_sum_gift_amount > 0 else 0)
-        new_monthly_revenue = int(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean)
+        one_time_income += expected_gift if lump_sum_gift_amount > 0 else 0
 
-        # Program net revenue
-        program_net = (
-                youth_programs_revenue - youth_programs_expenses
-                + aquatics_revenue - aquatics_expenses
-                + fitness_revenue - fitness_expenses
-                + rental_revenue
-                + retail_revenue - retail_expenses
-                + special_events_revenue - special_events_expenses
+        monthly_dues_revenue = int(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean)
+
+        program_gross_revenue = (
+                youth_programs_revenue + aquatics_revenue + fitness_revenue
+                + rental_revenue + retail_revenue + special_events_revenue
+        )
+        program_expenses = (
+                youth_programs_expenses + aquatics_expenses + fitness_expenses
+                + retail_expenses + special_events_expenses
         )
 
-        # Totals
-        monthly_revenue_total = new_monthly_revenue + program_net
-        monthly_difference = monthly_revenue_total - monthly_expenses
+        overhead_expenses = monthly_expenses
 
-        # Display four compact metrics in two columns
+        monthly_surplus = monthly_dues_revenue + (program_gross_revenue - program_expenses) - overhead_expenses
+
+        # Display metrics in two columns
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("One-Time Income", f"${expected_one_time:,}")
-            st.metric("Monthly Revenue", f"${monthly_revenue_total:,}")
+            st.metric("One-Time Income", f"${one_time_income:,}")
+            st.metric("Monthly Dues Revenue", f"${monthly_dues_revenue:,}")
+            st.metric("Program Gross Revenue", f"${program_gross_revenue:,}")
         with col2:
-            st.metric("Monthly Expenses", f"${monthly_expenses:,}")
-            st.metric("Surplus/Deficit", f"${monthly_difference:,}", delta=f"${monthly_difference:,}")
+            st.metric("Program Expenses", f"${program_expenses:,}")
+            st.metric("Overhead Expenses", f"${overhead_expenses:,}")
+            st.metric("Monthly Surplus/Deficit", f"${monthly_surplus:,}", delta=f"${monthly_surplus:,}")
 
         # Run projection
         run_simulation_btn = st.button("🚀 Run Financial Projection", type="primary")
