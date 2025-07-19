@@ -626,7 +626,7 @@ def main():
         """, unsafe_allow_html=True)
 
         # Financial Baseline
-        with st.expander("💰 Current Financial Situation", expanded=True):
+        with st.expander("💰 Current Financial Situation", expanded=False):
             st.markdown("**What's in the bank right now?**")
             starting_reserves = st.number_input(
                 "Current Cash Reserves",
@@ -653,7 +653,7 @@ def main():
             ) / 100
 
         # Membership and Dues
-        with st.expander("👥 Members and Monthly Dues", expanded=True):
+        with st.expander("👥 Members and Monthly Dues", expanded=False):
             st.markdown("**Current membership**")
             initial_members = st.number_input(
                 "Number of Member Households",
@@ -681,7 +681,7 @@ def main():
             )
 
         # Lump Sum Gift
-        with st.expander("🎁 One-Time Gift/Donation", expanded=True):
+        with st.expander("🎁 One-Time Gift/Donation", expanded=False):
             st.markdown("""
             <div class="help-text">
             Model a potential one-time donation from a generous member or supporter to help the club through its current situation.
@@ -707,7 +707,7 @@ def main():
             lump_sum_gift_uncertainty = lump_sum_gift_uncertainty / 100
 
         # Program Revenues and Expenses
-        with st.expander("🏊 Program Revenues & Expenses", expanded=True):
+        with st.expander("🏊 Program Revenues & Expenses", expanded=False):
             st.markdown("""
             <div class="help-text">
             Enter monthly revenues and expenses for each program. These will grow at the program growth rate.
@@ -857,7 +857,7 @@ def main():
                 program_uncertainty = program_uncertainty / 100
 
         # Behavior Assumptions
-        with st.expander("📈 Member Behavior Predictions", expanded=True):
+        with st.expander("📈 Member Behavior Predictions", expanded=False):
             st.markdown("""
             <div class="warning-box">
             <strong>⚠️ These are your best guesses</strong><br>
