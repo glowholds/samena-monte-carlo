@@ -1125,6 +1125,10 @@ def main():
                        retail_revenue - retail_expenses +
                        special_events_revenue - special_events_expenses)
 
+        # Recompute these so expected_assessment exists here:
+        expected_assessment = int(initial_members * assessment_payment_mean_decimal * assessment_amount)
+        expected_gift = int(lump_sum_gift_amount * (1 - lump_sum_gift_uncertainty * 0.5))
+
         # Build the one-time income sources section
         one_time_sources = f'<li>Assessment revenue: <strong>${expected_assessment:,}</strong></li>'
         if lump_sum_gift_amount > 0:
