@@ -25,14 +25,13 @@ footer {visibility: hidden;}
 """
 st.markdown(hide_all, unsafe_allow_html=True)
 
-
 # ====================================
 # CENTRALIZED DEFAULT VALUES
 # ====================================
 DEFAULT_VALUES = {
     # Financial Baseline
     "starting_reserves": 228299,  # Current cash reserves (FY2025)
-    "monthly_expenses": 432795,  # Monthly operating expenses (FY2025: ($5,193,534 / 12)-123,432 program expenses)
+    "monthly_expenses": 309343,  # Monthly operating expenses (FY2025: $5,193,534 / 12)
     "expense_growth_rate": 3.0,  # Annual expense growth rate (%)
 
     # Membership and Dues
@@ -276,7 +275,7 @@ def run_simulation(
                                         n_simulations)
         # Add probability of not receiving gift at all (higher uncertainty = higher chance of no gift)
         gift_probability = np.random.random(n_simulations) > (
-                    lump_sum_gift_uncertainty * 0.5)  # Max 50% chance of no gift
+                lump_sum_gift_uncertainty * 0.5)  # Max 50% chance of no gift
         gift_amounts = gift_amounts * gift_probability
         gift_amounts = np.maximum(gift_amounts, 0)  # No negative gifts
     else:
@@ -335,6 +334,174 @@ def run_simulation(
             # Track data
             monthly_reserves.append(reserves)
             monthly_members.append(paying_members)
+
+        ending_reserves.append(reserves)
+        reserve_trajectories.append(monthly_reserves)
+        member_trajectories.append(monthly_members)
+        program_revenue_trajectories.append(monthly_program_revenue)
+
+    return ending_reserves, reserve_trajectories, member_trajectories
+
+
+def run_simulation_gradual(
+        starting_reserves,
+        monthly_expenses,
+        initial_members,
+        assessment_amount,
+        monthly_dues,
+        assessment_payment_mean,
+        assessment_payment_std,
+        retention_mean,
+        retention_std,
+        dues_increase_mean,
+        dues_increase_std,
+        new_members_per_month,
+        new_members_std,
+        months,
+        n_simulations,
+        expense_growth_rate=0.0,
+        program_revenues=None,
+        program_expenses=None,
+        program_growth_rate=0.0,
+        program_uncertainty=0.0,
+        lump_sum_gift_amount=0,
+        lump_sum_gift_uncertainty=0.0
+):
+    """
+    Gradual transition model where:
+    - Assessment is paid immediately
+    - Members who don't pay assessment continue paying old dues until their renewal
+    - Members who pay assessment pay increased dues at their renewal
+    - Member losses happen gradually over 12 months
+    """
+    # Set random seed for reproducibility
+    np.random.seed(42)
+
+    # Generate random variables with proper bounds
+    assessment_payment_rate = np.clip(
+        np.random.normal(assessment_payment_mean, assessment_payment_std, n_simulations),
+        0.4, 1.0
+    )
+
+    # Generate initial retention rates
+    raw_retention_rate = np.random.normal(retention_mean, retention_std, n_simulations)
+
+    # IMPORTANT: Ensure retention rate is never higher than assessment payment rate
+    # If they don't pay assessment, they can't retain membership
+    membership_retention_rate = np.minimum(
+        np.clip(raw_retention_rate, 0.5, 1.0),
+        assessment_payment_rate
+    )
+
+    dues_increase_factor = np.clip(
+        np.random.normal(dues_increase_mean, dues_increase_std, n_simulations),
+        1.0, 2.0
+    )
+
+    # New members with variability
+    new_members = np.maximum(
+        np.random.normal(new_members_per_month, new_members_std, size=(n_simulations, months)),
+        0
+    ).astype(int)
+
+    # Program revenue variability factors
+    program_variability = np.clip(
+        np.random.normal(1.0, program_uncertainty, n_simulations),
+        0.5, 1.5
+    )
+
+    # Lump sum gift variability (with possibility of not receiving it)
+    if lump_sum_gift_amount > 0:
+        # Generate gift amounts with uncertainty
+        gift_amounts = np.random.normal(lump_sum_gift_amount, lump_sum_gift_amount * lump_sum_gift_uncertainty,
+                                        n_simulations)
+        # Add probability of not receiving gift at all (higher uncertainty = higher chance of no gift)
+        gift_probability = np.random.random(n_simulations) > (
+                lump_sum_gift_uncertainty * 0.5)  # Max 50% chance of no gift
+        gift_amounts = gift_amounts * gift_probability
+        gift_amounts = np.maximum(gift_amounts, 0)  # No negative gifts
+    else:
+        gift_amounts = np.zeros(n_simulations)
+
+    ending_reserves = []
+    reserve_trajectories = []
+    member_trajectories = []
+    program_revenue_trajectories = []
+
+    for i in range(n_simulations):
+        reserves = starting_reserves
+
+        # Calculate final membership (those who will stay long-term)
+        final_members = int(initial_members * membership_retention_rate[i])
+
+        # One-time assessment revenue (paid immediately)
+        assessment_revenue = assessment_amount * (initial_members * assessment_payment_rate[i])
+        reserves += assessment_revenue
+
+        # One-time lump sum gift
+        reserves += gift_amounts[i]
+
+        # Adjusted monthly dues
+        monthly_dues_adjusted = monthly_dues * dues_increase_factor[i]
+
+        # Track monthly data
+        monthly_reserves = [reserves]
+        monthly_members = [initial_members]  # Start with all members
+        monthly_program_revenue = []
+        current_expenses = monthly_expenses
+
+        for month in range(months):
+            # During first 12 months: gradual transition
+            if month < 12:
+                # Each month, 1/12 of memberships come up for renewal
+                renewal_proportion = (month + 1) / 12.0
+
+                # Key insight: We need to track who is still paying
+                # 1. Not yet renewed: Everyone who hasn't reached renewal (they ALL still pay old dues)
+                members_not_yet_renewed = int(initial_members * (1 - renewal_proportion))
+
+                # 2. Those who renewed and stayed (now paying new dues)
+                members_renewed_and_stayed = int(final_members * renewal_proportion)
+
+                # Total currently paying members
+                current_members = members_not_yet_renewed + members_renewed_and_stayed
+
+                # Dues calculation is correct:
+                # - Not yet renewed pay OLD dues
+                # - Renewed and stayed pay NEW dues
+                monthly_dues_income = (members_not_yet_renewed * monthly_dues +
+                                       members_renewed_and_stayed * monthly_dues_adjusted)
+
+            else:
+                # After 12 months: only retained members at new dues
+                current_members = final_members
+                monthly_dues_income = current_members * monthly_dues_adjusted
+
+            # Add new members (they pay new dues)
+            new_members_count = new_members[i][month]
+            current_members += new_members_count
+            monthly_dues_income += new_members_count * monthly_dues_adjusted
+
+            # Apply expense growth
+            current_expenses = monthly_expenses * (1 + expense_growth_rate) ** (month / 12)
+
+            # Add program revenues and expenses with uncertainty
+            if program_revenues and program_expenses:
+                program_growth_factor = (1 + program_growth_rate) ** (month / 12)
+                monthly_program_net = 0
+                for prog_rev, prog_exp in zip(program_revenues, program_expenses):
+                    # Apply both growth and uncertainty
+                    adjusted_rev = prog_rev * program_growth_factor * program_variability[i]
+                    adjusted_exp = prog_exp * program_growth_factor * program_variability[i]
+                    monthly_program_net += (adjusted_rev - adjusted_exp)
+                monthly_dues_income += monthly_program_net
+                monthly_program_revenue.append(monthly_program_net)
+
+            reserves += monthly_dues_income - current_expenses
+
+            # Track data
+            monthly_reserves.append(reserves)
+            monthly_members.append(current_members)
 
         ending_reserves.append(reserves)
         reserve_trajectories.append(monthly_reserves)
@@ -469,12 +636,12 @@ def main():
                 format="%d"
             )
 
-            st.markdown("**How much does it cost to run the club each month?**")
+            st.markdown("**Overhead (non-program) monthly expenses**")
             monthly_expenses = st.number_input(
-                "Monthly Operating Expenses",
+                "Monthly Overhead Expenses",
                 value=DEFAULT_VALUES["monthly_expenses"],
                 step=5000,
-                help=f"Based on FY2025: Total annual expenses (${DEFAULT_VALUES['annual_expenses'] / 1e6:.1f}M) ÷ 12",
+                help=f"FY2025 total monthly expense (432,795) minus sum of program-specific monthly costs (123,452) = 309,343",
                 format="%d"
             )
 
@@ -708,7 +875,7 @@ def main():
                     40, 100, DEFAULT_VALUES["assessment_payment_mean"], 5,
                     help="What percentage of members will actually pay the special assessment?"
                 )
-                assessment_payment_mean = assessment_payment_mean / 100
+                assessment_payment_mean_decimal = assessment_payment_mean / 100
 
             with col2:
                 assessment_payment_std = st.slider(
@@ -723,12 +890,14 @@ def main():
             col1, col2 = st.columns(2)
 
             with col1:
+                # Ensure retention can't exceed assessment payment
+                max_retention = min(assessment_payment_mean, DEFAULT_VALUES["retention_mean"])
                 retention_mean = st.slider(
                     "% Who Will Stay",
-                    50, 100, DEFAULT_VALUES["retention_mean"], 5,
-                    help="What percentage of members will remain after assessment & dues increase?"
+                    50, assessment_payment_mean, max_retention, 5,
+                    help="What percentage of members will remain after assessment & dues increase? Note: This cannot exceed the assessment payment rate since non-payment results in membership loss."
                 )
-                retention_mean = retention_mean / 100
+                retention_mean_decimal = retention_mean / 100
 
             with col2:
                 retention_std = st.slider(
@@ -778,6 +947,12 @@ def main():
 
         # Simulation Settings
         with st.expander("⚙️ Simulation Settings", expanded=False):
+            use_gradual_transition = st.checkbox(
+                "Use Gradual Member Transition",
+                value=True,
+                help="If checked, members who don't pay assessment continue paying old dues until their renewal date. If unchecked, all changes happen immediately."
+            )
+
             months = st.slider(
                 "Months to Project",
                 6, 36, DEFAULT_VALUES["months"],
@@ -798,42 +973,40 @@ def main():
                 help="The minimum cash balance needed for safe operations",
                 format="%d"
             )
-
-        # Quick calculations display
+        # ─── Compact Quick Overview ───
         st.markdown("---")
-        st.markdown("### 📊 Quick Math")
-        expected_assessment = int(initial_members * assessment_payment_mean * assessment_amount)
-        expected_gift = int(lump_sum_gift_amount * (1 - lump_sum_gift_uncertainty * 0.5))  # Account for probability
-        new_monthly_revenue = int(initial_members * retention_mean * monthly_dues * dues_increase_mean)
+        st.subheader("📊 Quick Overview")
 
-        # Calculate program net revenue
-        program_net = (youth_programs_revenue - youth_programs_expenses +
-                       aquatics_revenue - aquatics_expenses +
-                       fitness_revenue - fitness_expenses +
-                       rental_revenue +  # Rental has no expenses
-                       retail_revenue - retail_expenses +
-                       special_events_revenue - special_events_expenses)
+        # Compute key figures
+        expected_assessment = int(initial_members * assessment_payment_mean_decimal * assessment_amount)
+        expected_gift = int(lump_sum_gift_amount * (1 - lump_sum_gift_uncertainty * 0.5))
+        expected_one_time = expected_assessment + (expected_gift if lump_sum_gift_amount > 0 else 0)
+        new_monthly_revenue = int(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean)
 
-        total_monthly_revenue = new_monthly_revenue + program_net
-        monthly_difference = total_monthly_revenue - monthly_expenses
+        # Program net revenue
+        program_net = (
+                youth_programs_revenue - youth_programs_expenses
+                + aquatics_revenue - aquatics_expenses
+                + fitness_revenue - fitness_expenses
+                + rental_revenue
+                + retail_revenue - retail_expenses
+                + special_events_revenue - special_events_expenses
+        )
 
+        # Totals
+        monthly_revenue_total = new_monthly_revenue + program_net
+        monthly_difference = monthly_revenue_total - monthly_expenses
+
+        # Display four compact metrics in two columns
         col1, col2 = st.columns(2)
         with col1:
-            st.markdown(f"**Expected from assessment:**  \n${expected_assessment:,}")
-            if lump_sum_gift_amount > 0:
-                st.markdown(f"**Expected from gift:**  \n${expected_gift:,}")
-            st.markdown(f"**New monthly dues revenue:**  \n${new_monthly_revenue:,}")
-            st.markdown(f"**Monthly program net revenue:**  \n${program_net:,}")
-
+            st.metric("One-Time Income", f"${expected_one_time:,}")
+            st.metric("Monthly Revenue", f"${monthly_revenue_total:,}")
         with col2:
-            st.markdown(f"**Total monthly revenue:**  \n${total_monthly_revenue:,}")
-            st.markdown(f"**Current monthly expenses:**  \n${monthly_expenses:,}")
-            deficit_color = "green" if monthly_difference >= 0 else "red"
-            st.markdown(
-                f"**Monthly surplus/deficit:**  \n<span style='color: {deficit_color}; font-weight: bold;'>${monthly_difference:,}</span>",
-                unsafe_allow_html=True)
+            st.metric("Monthly Expenses", f"${monthly_expenses:,}")
+            st.metric("Surplus/Deficit", f"${monthly_difference:,}", delta=f"${monthly_difference:,}")
 
-        # Run simulation button
+        # Run projection
         run_simulation_btn = st.button("🚀 Run Financial Projection", type="primary")
 
     # Main content area
@@ -846,30 +1019,57 @@ def main():
                                 0,  # Rental has no expenses
                                 retail_expenses, special_events_expenses]
 
-            ending_reserves, reserve_trajectories, member_trajectories = run_simulation(
-                starting_reserves,
-                monthly_expenses,
-                initial_members,
-                assessment_amount,
-                monthly_dues,
-                assessment_payment_mean,
-                assessment_payment_std,
-                retention_mean,
-                retention_std,
-                dues_increase_mean,
-                dues_increase_std,
-                new_members_per_month,
-                new_members_std,
-                months,
-                n_simulations,
-                expense_growth_rate,
-                program_revenues,
-                program_expenses,
-                program_growth_rate,
-                program_uncertainty,
-                lump_sum_gift_amount,
-                lump_sum_gift_uncertainty
-            )
+            # Choose which simulation to run
+            if use_gradual_transition:
+                ending_reserves, reserve_trajectories, member_trajectories = run_simulation_gradual(
+                    starting_reserves,
+                    monthly_expenses,
+                    initial_members,
+                    assessment_amount,
+                    monthly_dues,
+                    assessment_payment_mean_decimal,
+                    assessment_payment_std,
+                    retention_mean_decimal,
+                    retention_std,
+                    dues_increase_mean,
+                    dues_increase_std,
+                    new_members_per_month,
+                    new_members_std,
+                    months,
+                    n_simulations,
+                    expense_growth_rate,
+                    program_revenues,
+                    program_expenses,
+                    program_growth_rate,
+                    program_uncertainty,
+                    lump_sum_gift_amount,
+                    lump_sum_gift_uncertainty
+                )
+            else:
+                ending_reserves, reserve_trajectories, member_trajectories = run_simulation(
+                    starting_reserves,
+                    monthly_expenses,
+                    initial_members,
+                    assessment_amount,
+                    monthly_dues,
+                    assessment_payment_mean_decimal,
+                    assessment_payment_std,
+                    retention_mean_decimal,
+                    retention_std,
+                    dues_increase_mean,
+                    dues_increase_std,
+                    new_members_per_month,
+                    new_members_std,
+                    months,
+                    n_simulations,
+                    expense_growth_rate,
+                    program_revenues,
+                    program_expenses,
+                    program_growth_rate,
+                    program_uncertainty,
+                    lump_sum_gift_amount,
+                    lump_sum_gift_uncertainty
+                )
 
         # Calculate statistics
         p5 = np.percentile(ending_reserves, 5)
@@ -943,12 +1143,13 @@ def main():
                 </li>
                 <li>Monthly revenue breakdown:
                     <ul>
-                        <li>Dues revenue: <strong>${(initial_members * retention_mean * monthly_dues * dues_increase_mean):,.0f}</strong></li>
+                        <li>Dues revenue: <strong>${(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean):,.0f}</strong></li>
                         <li>Program net revenue: <strong>${program_net:,.0f}</strong></li>
-                        <li>Total revenue: <strong>${(initial_members * retention_mean * monthly_dues * dues_increase_mean + program_net):,.0f}</strong></li>
+                        <li>Total revenue: <strong>${(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean + program_net):,.0f}</strong></li>
                     </ul>
                 </li>
                 <li>Monthly expenses: <strong>${monthly_expenses:,.0f}</strong></li>
+                <li>Transition model: <strong>{'Gradual (12 months)' if use_gradual_transition else 'Immediate'}</strong></li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -985,6 +1186,193 @@ def main():
             (a {'gain' if final_members_median > initial_members else 'loss'} of 
             {abs(int(final_members_median - initial_members))} members).
             """)
+
+            # Add membership trajectory chart
+            st.markdown("### Membership Over Time")
+
+            # Calculate percentiles for membership
+            member_percentiles = member_df.quantile([0.05, 0.25, 0.5, 0.75, 0.95], axis=1).T
+
+            fig_members = go.Figure()
+
+            # Add confidence bands
+            fig_members.add_trace(go.Scatter(
+                x=list(range(months + 1)) * 2,
+                y=list(member_percentiles[0.05]) + list(member_percentiles[0.95])[::-1],
+                fill='toself',
+                fillcolor='rgba(255, 182, 193, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=False,
+                name='90% Confidence'
+            ))
+
+            # Add median line
+            fig_members.add_trace(go.Scatter(
+                x=list(range(months + 1)),
+                y=member_percentiles[0.5],
+                mode='lines',
+                name='Median Membership',
+                line=dict(color='darkred', width=3)
+            ))
+
+            # Add initial membership reference line
+            fig_members.add_hline(y=initial_members, line_dash="dot", line_color="gray",
+                                  annotation_text=f"Starting: {initial_members}")
+
+            fig_members.update_layout(
+                title="Projected Membership Over Time",
+                xaxis_title="Month",
+                yaxis_title="Number of Members",
+                hovermode='x unified',
+                height=400
+            )
+
+            st.plotly_chart(fig_members, use_container_width=True)
+
+            # Add monthly revenue analysis
+            st.markdown("### Monthly Revenue Analysis")
+
+            # Calculate monthly revenues from trajectories
+            monthly_revenues = []
+            for i in range(n_simulations):
+                sim_revenues = []
+                for month in range(months + 1):
+                    if month == 0:
+                        # Month 0 includes assessment
+                        revenue = expected_assessment / n_simulations  # Rough approximation
+                    else:
+                        # Calculate from reserve changes
+                        if month < len(reserve_trajectories[i]):
+                            reserve_change = reserve_trajectories[i][month] - reserve_trajectories[i][month - 1]
+                            # Revenue = reserve change + expenses
+                            monthly_expense = monthly_expenses * (1 + expense_growth_rate) ** ((month - 1) / 12)
+                            revenue = reserve_change + monthly_expense
+                            sim_revenues.append(revenue)
+                monthly_revenues.append(sim_revenues)
+
+            # Convert to DataFrame for percentile calculations
+            revenue_df = pd.DataFrame(monthly_revenues).T
+            revenue_percentiles = revenue_df.quantile([0.05, 0.25, 0.5, 0.75, 0.95], axis=1).T
+
+            fig_revenue = go.Figure()
+
+            # Add confidence bands
+            fig_revenue.add_trace(go.Scatter(
+                x=list(range(1, months + 1)) * 2,
+                y=list(revenue_percentiles[0.05]) + list(revenue_percentiles[0.95])[::-1],
+                fill='toself',
+                fillcolor='rgba(144, 238, 144, 0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=False,
+                name='90% Confidence'
+            ))
+
+            # Add median line
+            fig_revenue.add_trace(go.Scatter(
+                x=list(range(1, months + 1)),
+                y=revenue_percentiles[0.5],
+                mode='lines',
+                name='Median Revenue',
+                line=dict(color='darkgreen', width=3)
+            ))
+
+            # Add expense line
+            expense_line = [monthly_expenses * (1 + expense_growth_rate) ** (m / 12) for m in range(months)]
+            fig_revenue.add_trace(go.Scatter(
+                x=list(range(1, months + 1)),
+                y=expense_line,
+                mode='lines',
+                name='Monthly Expenses',
+                line=dict(color='red', width=2, dash='dash')
+            ))
+
+            fig_revenue.update_layout(
+                title="Monthly Revenue vs Expenses",
+                xaxis_title="Month",
+                yaxis_title="Amount ($)",
+                hovermode='x unified',
+                height=400
+            )
+
+            st.plotly_chart(fig_revenue, use_container_width=True)
+
+            # Add transition comparison if gradual model is used
+            if use_gradual_transition:
+                st.markdown("### Transition Period Analysis (First 12 Months)")
+
+                # Create comparison metrics
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    avg_members_yr1 = member_percentiles[0.5][:13].mean()
+                    st.metric(
+                        "Avg Members (Year 1)",
+                        f"{int(avg_members_yr1):,}",
+                        f"{int(avg_members_yr1 - initial_members):,}"
+                    )
+
+                with col2:
+                    avg_revenue_yr1 = revenue_percentiles[0.5][:12].mean()
+                    st.metric(
+                        "Avg Monthly Revenue (Year 1)",
+                        f"${int(avg_revenue_yr1):,}",
+                        f"${int(avg_revenue_yr1 - monthly_expenses):,}"
+                    )
+
+                with col3:
+                    transition_benefit = (initial_members - int(
+                        initial_members * retention_mean_decimal)) * monthly_dues * 6
+                    st.metric(
+                        "Transition Benefit",
+                        f"${int(transition_benefit):,}",
+                        "From gradual loss"
+                    )
+
+                st.info("""
+                📊 **Gradual Transition Analysis**: During the 12-month transition period, members who don't pay 
+                the assessment continue paying old dues until their renewal date. This generates additional revenue 
+                compared to immediate termination, but may be offset by the delayed dues increase for retained members.
+                """)
+
+            # Add detailed month-by-month breakdown
+            with st.expander("📊 Show Month-by-Month Breakdown"):
+                # Create detailed breakdown for first 12 months
+                breakdown_data = []
+                # Use median values for the example
+                example_final_members = int(initial_members * retention_mean_decimal)
+                example_new_dues = int(monthly_dues * dues_increase_mean)
+
+                for month in range(min(12, months)):
+                    if use_gradual_transition and month < 12:
+                        renewal_prop = (month + 1) / 12.0
+                        not_renewed = int(initial_members * (1 - renewal_prop))
+                        renewed_stayed = int(example_final_members * renewal_prop)
+
+                        breakdown_data.append({
+                            'Month': month + 1,
+                            'Not Yet Renewed': not_renewed,
+                            'Renewed & Stayed': renewed_stayed,
+                            'Total Members': not_renewed + renewed_stayed,
+                            'Revenue (Old Dues)': f"${not_renewed * monthly_dues:,}",
+                            'Revenue (New Dues)': f"${renewed_stayed * example_new_dues:,}",
+                            'Total Dues Revenue': f"${not_renewed * monthly_dues + renewed_stayed * example_new_dues:,}"
+                        })
+                    else:
+                        # Immediate model or after transition
+                        members = example_final_members
+                        revenue = members * example_new_dues
+                        breakdown_data.append({
+                            'Month': month + 1,
+                            'Not Yet Renewed': 0,
+                            'Renewed & Stayed': members,
+                            'Total Members': members,
+                            'Revenue (Old Dues)': "$0",
+                            'Revenue (New Dues)': f"${revenue:,}",
+                            'Total Dues Revenue': f"${revenue:,}"
+                        })
+
+                breakdown_df = pd.DataFrame(breakdown_data)
+                st.dataframe(breakdown_df, hide_index=True)
 
         with tab3:
             st.markdown("### Program Revenue & Expense Analysis")
@@ -1106,7 +1494,7 @@ def main():
             with col1:
                 st.markdown("**Positive Factors:**")
                 st.markdown(f"""
-                - Assessment collection: ${assessment_amount * initial_members * assessment_payment_mean:,.0f} expected
+                - Assessment collection: ${assessment_amount * initial_members * assessment_payment_mean_decimal:,.0f} expected
                 {f'- Lump sum gift: ${expected_gift:,.0f} expected' if lump_sum_gift_amount > 0 else ''}
                 - Dues increase: {(dues_increase_mean - 1) * 100:.0f}% boost to revenue
                 - New member growth: {new_members_per_month * months} expected over {months} months
@@ -1117,7 +1505,7 @@ def main():
             with col2:
                 st.markdown("**Risk Factors:**")
                 st.markdown(f"""
-                - Member attrition: {(1 - retention_mean) * 100:.0f}% expected loss
+                - Member attrition: {(1 - retention_mean_decimal) * 100:.0f}% expected loss
                 - Expense growth: {expense_growth_rate * 100:.0f}% annual increase
                 - Collection uncertainty: ±{assessment_payment_std * 100:.0f}% variation
                 {f'- Gift uncertainty: ±{lump_sum_gift_uncertainty * 100:.0f}% variation' if lump_sum_gift_amount > 0 else ''}
@@ -1136,7 +1524,8 @@ def main():
                     'monthly_dues': monthly_dues,
                     'lump_sum_gift': lump_sum_gift_amount,
                     'months_simulated': months,
-                    'simulations_run': n_simulations
+                    'simulations_run': n_simulations,
+                    'transition_model': 'gradual' if use_gradual_transition else 'immediate'
                 },
                 'results': {
                     'median_outcome': p50,
