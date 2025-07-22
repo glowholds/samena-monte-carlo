@@ -45,8 +45,10 @@ DEFAULT_VALUES = {
     "assessment_payment_std": 10,  # Uncertainty range (±%)
     "retention_mean": 80,  # % who will stay
     "retention_std": 10,  # Uncertainty range (±%)
-    "dues_increase_percent": 30,  # Dues increase %
+    "dues_increase_percent": 30,  # Initial dues increase %
     "dues_increase_std": 10,  # Implementation variance (±%)
+    "annual_dues_increase": 3,  # Annual dues increase after year 1 (%)
+    "annual_dues_increase_std": 1,  # Annual increase variance (±%)
     "new_members_per_month": 2,  # New members/month
     "new_members_std": 2,  # Variability
 
@@ -200,9 +202,9 @@ def load_samena_logo():
         ax.text(0.5, 0.5, 'SAMENA CLUB', fontsize=20, weight='bold',
                 ha='center', va='center', color='#2a5298')
         ax.axis('off')
-        buf = BytesIO();
+        buf = BytesIO()
         plt.savefig(buf, format='png', bbox_inches='tight', transparent=True)
-        buf.seek(0);
+        buf.seek(0)
         plt.close()
         img_str = base64.b64encode(buf.read()).decode()
         return f"data:image/png;base64,{img_str}"
@@ -261,6 +263,8 @@ def run_simulation(
         retention_std,
         dues_increase_mean,
         dues_increase_std,
+        annual_dues_increase_mean,
+        annual_dues_increase_std,
         new_members_per_month,
         new_members_std,
         months,
@@ -284,13 +288,20 @@ def run_simulation(
         np.random.normal(assessment_payment_mean, assessment_payment_std, n_simulations),
         0.4, 1.0
     )
-    membership_retention_rate = np.clip(
+    raw_retention_rate = np.clip(
         np.random.normal(retention_mean, retention_std, n_simulations),
         0.5, 1.0
     )
-    dues_increase_factor = np.clip(
+    membership_retention_rate = np.minimum(raw_retention_rate, assessment_payment_rate)
+    # Initial dues increase factor (one-time)
+    initial_dues_increase_factor = np.clip(
         np.random.normal(dues_increase_mean, dues_increase_std, n_simulations),
         1.0, 2.0
+    )
+    # Annual dues increase factors (year-over-year)
+    annual_dues_increase_factors = np.clip(
+        np.random.normal(annual_dues_increase_mean, annual_dues_increase_std, n_simulations),
+        1.0, 1.10  # Cap at 10% annual increase
     )
 
     # Payment plan adoption rate
@@ -354,8 +365,8 @@ def run_simulation(
         # One-time lump sum gift
         reserves += gift_amounts[i]
 
-        # Adjusted monthly dues
-        monthly_dues_adjusted = monthly_dues * dues_increase_factor[i]
+        # Initial adjusted monthly dues (one-time increase)
+        current_monthly_dues = monthly_dues * initial_dues_increase_factor[i]
 
         # Track monthly data
         monthly_reserves = [reserves]
@@ -364,6 +375,10 @@ def run_simulation(
         current_expenses = monthly_expenses
 
         for month in range(months):
+            # Apply annual dues increase at the start of each new year (after the first 12 months)
+            if month > 0 and month % 12 == 0:
+                current_monthly_dues *= annual_dues_increase_factors[i]
+
             # Add new members
             new_members_count = new_members[i][month]
             paying_members += new_members_count
@@ -372,7 +387,7 @@ def run_simulation(
             current_expenses = monthly_expenses * (1 + expense_growth_rate) ** (month / 12)
 
             # Calculate monthly financials
-            monthly_income = paying_members * monthly_dues_adjusted
+            monthly_income = paying_members * current_monthly_dues
 
             # Add monthly assessment payment if within payment plan period
             if month < payment_plan_months and payment_plan_months > 0:
@@ -416,6 +431,8 @@ def run_simulation_gradual(
         retention_std,
         dues_increase_mean,
         dues_increase_std,
+        annual_dues_increase_mean,
+        annual_dues_increase_std,
         new_members_per_month,
         new_members_std,
         months,
@@ -437,6 +454,7 @@ def run_simulation_gradual(
     - Members who don't pay assessment continue paying old dues until their renewal
     - Members who pay assessment pay increased dues at their renewal
     - Member losses happen gradually over 12 months
+    - Annual dues increases apply after the first year
     """
     # Set random seed for reproducibility
     np.random.seed(42)
@@ -457,9 +475,16 @@ def run_simulation_gradual(
         assessment_payment_rate
     )
 
-    dues_increase_factor = np.clip(
+    # Initial dues increase factor (one-time)
+    initial_dues_increase_factor = np.clip(
         np.random.normal(dues_increase_mean, dues_increase_std, n_simulations),
         1.0, 2.0
+    )
+
+    # Annual dues increase factors (year-over-year)
+    annual_dues_increase_factors = np.clip(
+        np.random.normal(annual_dues_increase_mean, annual_dues_increase_std, n_simulations),
+        1.0, 1.10  # Cap at 10% annual increase
     )
 
     # Payment plan adoption rate
@@ -525,8 +550,8 @@ def run_simulation_gradual(
         # One-time lump sum gift
         reserves += gift_amounts[i]
 
-        # Adjusted monthly dues
-        monthly_dues_adjusted = monthly_dues * dues_increase_factor[i]
+        # Initial adjusted monthly dues (after one-time increase)
+        current_monthly_dues = monthly_dues * initial_dues_increase_factor[i]
 
         # Track monthly data
         monthly_reserves = [reserves]
@@ -535,6 +560,10 @@ def run_simulation_gradual(
         current_expenses = monthly_expenses
 
         for month in range(months):
+            # Apply annual dues increase at the start of each new year (after the first 12 months)
+            if month > 0 and month % 12 == 0:
+                current_monthly_dues *= annual_dues_increase_factors[i]
+
             # During first 12 months: gradual transition
             if month < 12:
                 # Each month, 1/12 of memberships come up for renewal
@@ -550,21 +579,21 @@ def run_simulation_gradual(
                 # Total currently paying members
                 current_members = members_not_yet_renewed + members_renewed_and_stayed
 
-                # Dues calculation is correct:
+                # Dues calculation:
                 # - Not yet renewed pay OLD dues
-                # - Renewed and stayed pay NEW dues
+                # - Renewed and stayed pay CURRENT dues (which includes initial increase)
                 monthly_dues_income = (members_not_yet_renewed * monthly_dues +
-                                       members_renewed_and_stayed * monthly_dues_adjusted)
+                                       members_renewed_and_stayed * current_monthly_dues)
 
             else:
-                # After 12 months: only retained members at new dues
+                # After 12 months: only retained members at current dues
                 current_members = final_members
-                monthly_dues_income = current_members * monthly_dues_adjusted
+                monthly_dues_income = current_members * current_monthly_dues
 
-            # Add new members (they pay new dues)
+            # Add new members (they pay current dues)
             new_members_count = new_members[i][month]
             current_members += new_members_count
-            monthly_dues_income += new_members_count * monthly_dues_adjusted
+            monthly_dues_income += new_members_count * current_monthly_dues
 
             # Add monthly assessment payment if within payment plan period
             if month < payment_plan_months and payment_plan_months > 0:
@@ -1049,14 +1078,14 @@ def main():
                     )
                     retention_std = retention_std / 100
 
-                st.markdown("**Planned dues increase**")
+                st.markdown("**Initial dues increase (one-time)**")
                 col1, col2 = st.columns(2)
 
                 with col1:
                     dues_increase_percent = st.slider(
-                        "Dues Increase %",
+                        "Initial Dues Increase %",
                         0, 100, DEFAULT_VALUES["dues_increase_percent"], 10,
-                        help="Percentage increase in monthly dues"
+                        help="One-time percentage increase in monthly dues"
                     )
                     dues_increase_mean = 1 + (dues_increase_percent / 100)
 
@@ -1068,6 +1097,26 @@ def main():
                         key="dues_uncertainty"
                     )
                     dues_increase_std = dues_increase_std / 100
+
+                st.markdown("**Annual dues increases (year-over-year)**")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    annual_dues_increase = st.slider(
+                        "Annual Dues Increase %",
+                        0, 10, DEFAULT_VALUES["annual_dues_increase"], 1,
+                        help="Percentage increase applied each year after the first"
+                    )
+                    annual_dues_increase_mean = 1 + (annual_dues_increase / 100)
+
+                with col2:
+                    annual_dues_increase_std = st.slider(
+                        "Annual Increase Variance (±%)",
+                        0, 5, DEFAULT_VALUES["annual_dues_increase_std"], 1,
+                        help="Variation in annual increases",
+                        key="annual_dues_uncertainty"
+                    )
+                    annual_dues_increase_std = annual_dues_increase_std / 100
 
                 st.markdown("**New member growth**")
                 col1, col2 = st.columns(2)
@@ -1152,12 +1201,21 @@ def main():
                 st.metric("Immediate Income", f"${immediate_income:,}")
                 if deferred_income > 0:
                     st.metric("Deferred Income (Payment Plan)", f"${deferred_income:,}")
-                st.metric("Monthly Dues Revenue", f"${monthly_dues_revenue:,}")
+                st.metric("Monthly Dues Revenue (Year 1)", f"${monthly_dues_revenue:,}")
                 st.metric("Program Gross Revenue", f"${program_gross_revenue:,}")
             with col2:
                 st.metric("Program Expenses", f"${program_expenses:,}")
                 st.metric("Overhead Expenses", f"${overhead_expenses:,}")
                 st.metric("Monthly Surplus/Deficit", f"${monthly_surplus:,}", delta=f"${monthly_surplus:,}")
+
+            # Show annual dues increase effect
+            if annual_dues_increase > 0:
+                year2_dues_revenue = int(monthly_dues_revenue * annual_dues_increase_mean)
+                st.info(f"""
+                💡 **Annual Dues Increases**: After the initial {dues_increase_percent}% increase, dues will increase by {annual_dues_increase}% annually.
+                - Year 1 monthly dues revenue: ${monthly_dues_revenue:,}
+                - Year 2 monthly dues revenue: ~${year2_dues_revenue:,} ({annual_dues_increase}% increase)
+                """)
 
             # Run projection
             run_simulation_btn = st.button("🚀 Run Financial Projection", type="primary")
@@ -1186,6 +1244,8 @@ def main():
                         retention_std,
                         dues_increase_mean,
                         dues_increase_std,
+                        annual_dues_increase_mean,
+                        annual_dues_increase_std,
                         new_members_per_month,
                         new_members_std,
                         months,
@@ -1214,6 +1274,8 @@ def main():
                         retention_std,
                         dues_increase_mean,
                         dues_increase_std,
+                        annual_dues_increase_mean,
+                        annual_dues_increase_std,
                         new_members_per_month,
                         new_members_std,
                         months,
@@ -1312,13 +1374,14 @@ def main():
                     </li>
                     <li>Monthly revenue breakdown:
                         <ul>
-                            <li>Dues revenue: <strong>${(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean):,.0f}</strong></li>
+                            <li>Dues revenue (Year 1): <strong>${(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean):,.0f}</strong></li>
                             <li>Program net revenue: <strong>${program_net:,.0f}</strong></li>
                             <li>Total revenue: <strong>${(initial_members * retention_mean_decimal * monthly_dues * dues_increase_mean + program_net):,.0f}</strong></li>
                         </ul>
                     </li>
                     <li>Monthly expenses: <strong>${monthly_expenses:,.0f}</strong></li>
                     <li>Transition model: <strong>{'Gradual (12 months)' if use_gradual_transition else 'Immediate'}</strong></li>
+                    <li>Dues increases: <strong>{dues_increase_percent}% initial + {annual_dues_increase}% annual</strong></li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -1503,6 +1566,44 @@ def main():
                     compared to immediate termination, but may be offset by the delayed dues increase for retained members.
                     """)
 
+                # Add annual dues increase visualization
+                if annual_dues_increase > 0 and months > 12:
+                    st.markdown("### Annual Dues Increase Impact")
+
+                    # Calculate dues revenue over time
+                    dues_revenues = []
+                    current_dues = monthly_dues * dues_increase_mean
+
+                    for month in range(months + 1):
+                        if month > 0 and month % 12 == 0:
+                            current_dues *= annual_dues_increase_mean
+                        dues_revenues.append(int(initial_members * retention_mean_decimal * current_dues))
+
+                    fig_dues = go.Figure()
+                    fig_dues.add_trace(go.Scatter(
+                        x=list(range(months + 1)),
+                        y=dues_revenues,
+                        mode='lines+markers',
+                        name='Monthly Dues Revenue',
+                        line=dict(color='purple', width=3),
+                        marker=dict(size=8)
+                    ))
+
+                    # Add year markers
+                    for year in range(1, (months // 12) + 1):
+                        fig_dues.add_vline(x=year * 12, line_dash="dot", line_color="gray",
+                                           annotation_text=f"Year {year + 1}")
+
+                    fig_dues.update_layout(
+                        title=f"Dues Revenue Growth ({dues_increase_percent}% initial + {annual_dues_increase}% annual)",
+                        xaxis_title="Month",
+                        yaxis_title="Monthly Dues Revenue ($)",
+                        hovermode='x unified',
+                        height=400
+                    )
+
+                    st.plotly_chart(fig_dues, use_container_width=True)
+
                 # Add detailed month-by-month breakdown
                 with st.expander("📊 Show Month-by-Month Breakdown"):
                     # Create detailed breakdown for first 12 months
@@ -1665,7 +1766,8 @@ def main():
                     st.markdown(f"""
                     - Assessment collection: ${assessment_amount * initial_members * assessment_payment_mean_decimal:,.0f} expected
                     {f'- Lump sum gift: ${expected_gift:,.0f} expected' if lump_sum_gift_amount > 0 else ''}
-                    - Dues increase: {(dues_increase_mean - 1) * 100:.0f}% boost to revenue
+                    - Initial dues increase: {(dues_increase_mean - 1) * 100:.0f}% boost to revenue
+                    - Annual dues increases: {annual_dues_increase}% per year
                     - New member growth: {new_members_per_month * months} expected over {months} months
                     - Program net revenue: ${program_net:,.0f}/month
                     - Program growth: {program_growth_rate * 100:.0f}% annual increase
@@ -1679,6 +1781,7 @@ def main():
                     - Collection uncertainty: ±{assessment_payment_std * 100:.0f}% variation
                     {f'- Gift uncertainty: ±{lump_sum_gift_uncertainty * 100:.0f}% variation' if lump_sum_gift_amount > 0 else ''}
                     - Program uncertainty: ±{program_uncertainty * 100:.0f}% variation
+                    - Annual increase variance: ±{annual_dues_increase_std * 100:.0f}%
                     """)
 
                 # Export options
@@ -1691,6 +1794,8 @@ def main():
                         'initial_members': initial_members,
                         'assessment_amount': assessment_amount,
                         'monthly_dues': monthly_dues,
+                        'initial_dues_increase': dues_increase_percent,
+                        'annual_dues_increase': annual_dues_increase,
                         'lump_sum_gift': lump_sum_gift_amount,
                         'months_simulated': months,
                         'simulations_run': n_simulations,
@@ -1754,7 +1859,7 @@ def main():
                 <div class="metric-card">
                     <h3>🎯 What You Can Test</h3>
                     <p>• Special assessments</p>
-                    <p>• Dues increases</p>
+                    <p>• Initial & annual dues increases</p>
                     <p>• Lump sum gifts</p>
                     <p>• Member retention impacts</p>
                     <p>• Growth scenarios</p>
@@ -1770,7 +1875,8 @@ def main():
                 1. **Review the current situation** in the sidebar (we've pre-filled it based on your 990)
                 2. **Set your proposed changes**:
                    - How much is the special assessment?
-                   - What percentage dues increase are you considering?
+                   - What percentage initial dues increase are you considering?
+                   - What annual increases will follow?
                    - Is there a potential major gift/donation?
                 3. **Consider payment plans** to improve member satisfaction and cash flow
                 4. **Estimate member reactions**:
@@ -1786,6 +1892,12 @@ def main():
                 - **Best/worst cases**: What could happen in extreme scenarios  
                 - **Risk levels**: How likely you are to run low on reserves
                 - **Trajectory charts**: How finances might evolve over time
+
+                ### New: Annual Dues Increases
+
+                You can now model both:
+                - **Initial increase**: A one-time larger increase when implementing changes
+                - **Annual increases**: Smaller year-over-year increases to keep up with inflation
 
                 ### Tips for Better Predictions
 
@@ -1836,7 +1948,9 @@ def main():
 
         # Find the optimal increase
         # Convert revenue strings back to numbers for finding max
-        elasticity_df['Revenue_Numeric'] = elasticity_df['Monthly Revenue'].str.replace('$', '').str.replace(',', '').astype(float)
+        elasticity_df['Revenue_Numeric'] = elasticity_df['Monthly Revenue'].str.replace('$', '').str.replace(',',
+                                                                                                             '').astype(
+            float)
 
         optimal_idx = elasticity_df['Revenue_Numeric'].idxmax()
         optimal_increase = elasticity_df.loc[optimal_idx, 'Dues Increase %']
@@ -1961,6 +2075,11 @@ def main():
         - Spread assessment payments over multiple months
         - Reduces immediate financial burden on members
         - May increase overall payment rates
+
+        #### 📈 Dues Increases
+        - **Initial Increase**: One-time larger increase when implementing changes
+        - **Annual Increases**: Smaller year-over-year increases to keep pace with inflation
+        - Both can be modeled with uncertainty ranges
 
         #### 📈 Elasticity Analysis
         - Find the optimal balance between price and retention
