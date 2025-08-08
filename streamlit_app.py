@@ -8,24 +8,6 @@ from datetime import datetime, timedelta
 import base64
 from io import BytesIO
 
-
-
-# This should be one of the first things in your app
-st.set_page_config(page_title="Your App Title", layout="wide")  # Optional
-
-# Hide all Streamlit branding
-hide_all = """
-<style>
-#MainMenu {visibility: hidden;}
-header {visibility: hidden;}
-footer {visibility: hidden;}
-.stDeployButton {display: none;}
-.stToolbar {visibility: hidden;}
-</style>
-"""
-st.markdown(hide_all, unsafe_allow_html=True)
-
-
 # ====================================
 # CENTRALIZED DEFAULT VALUES
 # ====================================
@@ -419,6 +401,7 @@ def run_simulation(
     return ending_reserves, reserve_trajectories, member_trajectories
 
 
+
 def run_simulation_gradual(
         starting_reserves,
         monthly_expenses,
@@ -449,181 +432,142 @@ def run_simulation_gradual(
         payment_plan_uncertainty=0.0
 ):
     """
-    Gradual transition model where:
-    - Assessment is paid immediately or over payment plan
-    - Members who don't pay assessment continue paying old dues until their renewal
-    - Members who pay assessment pay increased dues at their renewal
-    - Member losses happen gradually over 12 months
-    - Annual dues increases apply after the first year
+    Gradual transition model with *persistent* new members.
+    - Members transition over 12 months from initial to final (retained) count.
+    - New members are added each month and remain in subsequent months.
     """
-    # Set random seed for reproducibility
     np.random.seed(42)
 
-    # Generate random variables with proper bounds
+    # Assessment payment and retention
     assessment_payment_rate = np.clip(
-        np.random.normal(assessment_payment_mean, assessment_payment_std, n_simulations),
-        0.4, 1.0
+        np.random.normal(assessment_payment_mean, assessment_payment_std, n_simulations), 0.4, 1.0
     )
-
-    # Generate initial retention rates
     raw_retention_rate = np.random.normal(retention_mean, retention_std, n_simulations)
+    membership_retention_rate = np.minimum(np.clip(raw_retention_rate, 0.5, 1.0), assessment_payment_rate)
 
-    # IMPORTANT: Ensure retention rate is never higher than assessment payment rate
-    # If they don't pay assessment, they can't retain membership
-    membership_retention_rate = np.minimum(
-        np.clip(raw_retention_rate, 0.5, 1.0),
-        assessment_payment_rate
-    )
-
-    # Initial dues increase factor (one-time)
+    # Dues increases
     initial_dues_increase_factor = np.clip(
-        np.random.normal(dues_increase_mean, dues_increase_std, n_simulations),
-        1.0, 2.0
+        np.random.normal(dues_increase_mean, dues_increase_std, n_simulations), 1.0, 2.0
     )
-
-    # Annual dues increase factors (year-over-year)
     annual_dues_increase_factors = np.clip(
-        np.random.normal(annual_dues_increase_mean, annual_dues_increase_std, n_simulations),
-        1.0, 1.10  # Cap at 10% annual increase
+        np.random.normal(annual_dues_increase_mean, annual_dues_increase_std, n_simulations), 1.0, 1.10
     )
 
-    # Payment plan adoption rate
+    # Payment plan adoption
     if payment_plan_months > 0:
         payment_plan_rate = np.clip(
-            np.random.normal(payment_plan_adoption, payment_plan_uncertainty, n_simulations),
-            0.0, 1.0
+            np.random.normal(payment_plan_adoption, payment_plan_uncertainty, n_simulations), 0.0, 1.0
         )
     else:
         payment_plan_rate = np.zeros(n_simulations)
 
-    # New members with variability
+    # New members array (stochastic)
     new_members = np.maximum(
-        np.random.normal(new_members_per_month, new_members_std, size=(n_simulations, months)),
-        0
+        np.random.normal(new_members_per_month, new_members_std, size=(n_simulations, months)), 0
     ).astype(int)
 
-    # Program revenue variability factors
+    # Program variability
     program_variability = np.clip(
-        np.random.normal(1.0, program_uncertainty, n_simulations),
-        0.5, 1.5
+        np.random.normal(1.0, program_uncertainty, n_simulations), 0.5, 1.5
     )
 
-    # Lump sum gift variability (with possibility of not receiving it)
+    # Lump-sum gift
     if lump_sum_gift_amount > 0:
-        # Generate gift amounts with uncertainty
-        gift_amounts = np.random.normal(lump_sum_gift_amount, lump_sum_gift_amount * lump_sum_gift_uncertainty,
-                                        n_simulations)
-        # Add probability of not receiving gift at all (higher uncertainty = higher chance of no gift)
-        gift_probability = np.random.random(n_simulations) > (
-                lump_sum_gift_uncertainty * 0.5)  # Max 50% chance of no gift
-        gift_amounts = gift_amounts * gift_probability
-        gift_amounts = np.maximum(gift_amounts, 0)  # No negative gifts
+        gift_amounts = np.random.normal(
+            lump_sum_gift_amount, lump_sum_gift_amount * lump_sum_gift_uncertainty, n_simulations
+        )
+        gift_probability = np.random.random(n_simulations) > (lump_sum_gift_uncertainty * 0.5)
+        gift_amounts = np.maximum(gift_amounts * gift_probability, 0)
     else:
         gift_amounts = np.zeros(n_simulations)
 
     ending_reserves = []
     reserve_trajectories = []
     member_trajectories = []
-    program_revenue_trajectories = []
 
     for i in range(n_simulations):
         reserves = starting_reserves
-
-        # Calculate final membership (those who will stay long-term)
         final_members = int(initial_members * membership_retention_rate[i])
 
-        # Calculate assessment revenue
+        # Assessment collection + plan
         total_assessment = assessment_amount * (initial_members * assessment_payment_rate[i])
-
-        # Split between immediate and payment plan
         if payment_plan_months > 0:
             members_on_plan = payment_plan_rate[i]
             immediate_assessment = total_assessment * (1 - members_on_plan)
             monthly_assessment = (total_assessment * members_on_plan) / payment_plan_months
         else:
             immediate_assessment = total_assessment
-            monthly_assessment = 0
+            monthly_assessment = 0.0
 
-        # Add immediate assessment revenue
-        reserves += immediate_assessment
+        reserves += immediate_assessment + gift_amounts[i]
 
-        # One-time lump sum gift
-        reserves += gift_amounts[i]
-
-        # Initial adjusted monthly dues (after one-time increase)
+        # Dues level after initial increase
         current_monthly_dues = monthly_dues * initial_dues_increase_factor[i]
 
-        # Track monthly data
         monthly_reserves = [reserves]
-        monthly_members = [initial_members]  # Start with all members
-        monthly_program_revenue = []
+        monthly_members = [initial_members]  # month 0
         current_expenses = monthly_expenses
 
+        cumulative_new_members = 0  # <-- persist new members across months
+
         for month in range(months):
-            # Apply annual dues increase at the start of each new year (after the first 12 months)
+            # Annual dues bumps
             if month > 0 and month % 12 == 0:
                 current_monthly_dues *= annual_dues_increase_factors[i]
 
-            # During first 12 months: gradual transition
+            # Base membership from transition of initial cohort
             if month < 12:
-                # Each month, 1/12 of memberships come up for renewal
                 renewal_proportion = (month + 1) / 12.0
-
-                # Key insight: We need to track who is still paying
-                # 1. Not yet renewed: Everyone who hasn't reached renewal (they ALL still pay old dues)
                 members_not_yet_renewed = int(initial_members * (1 - renewal_proportion))
-
-                # 2. Those who renewed and stayed (now paying new dues)
                 members_renewed_and_stayed = int(final_members * renewal_proportion)
+                base_current_members = members_not_yet_renewed + members_renewed_and_stayed
 
-                # Total currently paying members
-                current_members = members_not_yet_renewed + members_renewed_and_stayed
-
-                # Dues calculation:
-                # - Not yet renewed pay OLD dues
-                # - Renewed and stayed pay CURRENT dues (which includes initial increase)
-                monthly_dues_income = (members_not_yet_renewed * monthly_dues +
-                                       members_renewed_and_stayed * current_monthly_dues)
-
+                # Dues from base cohort: old dues for not-yet-renewed, new dues for renewed
+                monthly_dues_income = (
+                    members_not_yet_renewed * monthly_dues +
+                    members_renewed_and_stayed * current_monthly_dues
+                )
             else:
-                # After 12 months: only retained members at current dues
-                current_members = final_members
-                monthly_dues_income = current_members * current_monthly_dues
+                base_current_members = final_members
+                monthly_dues_income = base_current_members * current_monthly_dues
 
-            # Add new members (they pay current dues)
+            # Add this month's new members and *persist* them
             new_members_count = new_members[i][month]
-            current_members += new_members_count
+            cumulative_new_members += new_members_count
+
+            # New members always pay current dues
             monthly_dues_income += new_members_count * current_monthly_dues
 
-            # Add monthly assessment payment if within payment plan period
-            if month < payment_plan_months and payment_plan_months > 0:
+            # Total members currently paying
+            current_members = base_current_members + cumulative_new_members
+
+            # Payment plan inflow
+            if payment_plan_months > 0 and month < payment_plan_months:
                 monthly_dues_income += monthly_assessment
 
-            # Apply expense growth
+            # Expense growth
             current_expenses = monthly_expenses * (1 + expense_growth_rate) ** (month / 12)
 
-            # Add program revenues and expenses with uncertainty
+            # Programs
             if program_revenues and program_expenses:
                 program_growth_factor = (1 + program_growth_rate) ** (month / 12)
-                monthly_program_net = 0
+                monthly_program_net = 0.0
                 for prog_rev, prog_exp in zip(program_revenues, program_expenses):
-                    # Apply both growth and uncertainty
-                    adjusted_rev = prog_rev * program_growth_factor * program_variability[i]
-                    adjusted_exp = prog_exp * program_growth_factor * program_variability[i]
-                    monthly_program_net += (adjusted_rev - adjusted_exp)
+                    adj_rev = prog_rev * program_growth_factor * program_variability[i]
+                    adj_exp = prog_exp * program_growth_factor * program_variability[i]
+                    monthly_program_net += (adj_rev - adj_exp)
                 monthly_dues_income += monthly_program_net
-                monthly_program_revenue.append(monthly_program_net)
 
+            # Update reserves
             reserves += monthly_dues_income - current_expenses
 
-            # Track data
+            # Track
             monthly_reserves.append(reserves)
             monthly_members.append(current_members)
 
         ending_reserves.append(reserves)
         reserve_trajectories.append(monthly_reserves)
         member_trajectories.append(monthly_members)
-        program_revenue_trajectories.append(monthly_program_revenue)
 
     return ending_reserves, reserve_trajectories, member_trajectories
 
