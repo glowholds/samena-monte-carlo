@@ -215,7 +215,7 @@ def find_optimal_dues_increase(base_members=1543, base_dues=114, elasticity=0.6)
     for dues_increase in range(0, 101, 5):  # 0% to 100% in 5% steps
         # Estimate retention based on elasticity
         # Elasticity means: X% price increase leads to (X * elasticity)% member loss
-        retention_rate = max(0.5, 1 - (dues_increase * elasticity / 100))
+        retention_rate = max(0, 1 - (dues_increase * elasticity / 100))
 
         new_dues = base_dues * (1 + dues_increase / 100)
         retained_members = int(base_members * retention_rate)
